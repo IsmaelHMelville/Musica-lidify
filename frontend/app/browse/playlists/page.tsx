@@ -155,7 +155,7 @@ export default function BrowsePlaylistsPage() {
             setShowUrlModal(false);
             setUrlInput("");
             router.push(
-                `/import/spotify?url=${encodeURIComponent(response.url)}`,
+                `/import/playlist?url=${encodeURIComponent(response.url)}`,
             );
         } catch (error: unknown) {
             const message =
