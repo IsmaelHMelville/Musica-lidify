@@ -15,7 +15,7 @@ import Image from "next/image";
 import { MobileSidebar } from "./MobileSidebar";
 
 const navigation = [
-    { name: "Collection", href: "/library" },
+    { name: "Collection", href: "/collection" },
     { name: "Radio", href: "/radio" },
     { name: "Discovery", href: "/discover" },
     { name: "Audiobooks", href: "/audiobooks" },

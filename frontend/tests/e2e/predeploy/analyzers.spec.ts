@@ -15,7 +15,7 @@ test.describe("Analyzers", () => {
 
     test("library shows content (requires working backend)", async ({ page }) => {
         await loginAsTestUser(page);
-        await page.goto("/library?tab=albums");
+        await page.goto("/collection?tab=albums");
 
         // If analyzers/backend are broken, library would be empty or error
         const albumLinks = page.locator('a[href^="/album/"]');
