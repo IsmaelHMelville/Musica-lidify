@@ -640,6 +640,7 @@ model Track {
   playlistItems               PlaylistItem[]
   trackGenres                 TrackGenre[]
   transcodedFiles             TranscodedFile[]
+  subsonicBookmarks           SubsonicBookmark[]
   trackEmbedding              TrackEmbedding?
   trackLyrics                 TrackLyrics?
 
@@ -726,6 +727,7 @@ model User {
   discoverConfig         UserDiscoverConfig?
   settings               UserSettings?
   shareLinks             ShareLink[]
+  subsonicBookmarks      SubsonicBookmark[]
   subsonicPlayQueue      SubsonicPlayQueue?
 }
 
@@ -837,6 +839,21 @@ model ShareLink {
 
   @@index([entityType, entityId])
   @@map("share_links")
+}
+
+model SubsonicBookmark {
+  id       String   @id @default(cuid())
+  userId   String
+  trackId  String
+  position Int      @default(0)
+  comment  String?
+  created  DateTime @default(now())
+  changed  DateTime @default(now())
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  track    Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, trackId])
+  @@map("subsonic_bookmarks")
 }
 
 model SubsonicPlayQueue {

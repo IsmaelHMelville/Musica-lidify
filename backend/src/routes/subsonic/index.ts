@@ -60,10 +60,6 @@ subsonicRouter.all("/getOpenSubsonicExtensions.view", (req: Request, res: Respon
 
 // Stubs for endpoints not yet fully implemented.
 // Return valid empty responses so strict clients (e.g. Symfonium) don't error.
-subsonicRouter.all("/getBookmarks.view", (req: Request, res: Response) => {
-    subsonicOk(req, res, { bookmarks: {} });
-});
-
 subsonicRouter.all("/getNowPlaying.view", (req: Request, res: Response) => {
     subsonicOk(req, res, { nowPlaying: {} });
 });

@@ -258,6 +258,77 @@ playbackRouter.all("/getPlayQueue.view", wrap(async (req, res) => {
     });
 }));
 
+// ===================== BOOKMARKS =====================
+
+playbackRouter.all("/getBookmarks.view", wrap(async (req, res) => {
+    const userId = req.user!.id;
+    const bookmarks = await prisma.subsonicBookmark.findMany({
+        where: { userId },
+        include: { track: { include: { album: { include: { artist: true } } } } },
+    });
+
+    const bookmarkEntries = bookmarks.map((b) => {
+        const track = b.track;
+        const album = track.album;
+        const artist = album.artist;
+        return {
+            "@_position": b.position,
+            "@_username": req.user!.username,
+            "@_comment": b.comment || undefined,
+            "@_created": b.created.toISOString(),
+            "@_changed": b.changed.toISOString(),
+            entry: mapSong(
+                track,
+                album,
+                artist.displayName || artist.name,
+                artist.id,
+                firstArtistGenre(artist.genres, artist.userGenres),
+            ),
+        };
+    });
+
+    return subsonicOk(req, res, {
+        bookmarks: bookmarkEntries.length ? { bookmark: bookmarkEntries } : {},
+    });
+}));
+
+playbackRouter.all("/createBookmark.view", wrap(async (req, res) => {
+    const userId = req.user!.id;
+    const id = req.query.id as string;
+    const positionRaw = req.query.position as string;
+    if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
+    if (positionRaw === undefined || positionRaw === "") {
+        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: position");
+    }
+
+    const position = parseInt(positionRaw, 10);
+    if (isNaN(position)) {
+        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Invalid parameter: position");
+    }
+
+    const comment = (req.query.comment as string) || undefined;
+
+    await prisma.subsonicBookmark.upsert({
+        where: { userId_trackId: { userId, trackId: id } },
+        create: { userId, trackId: id, position, comment: comment ?? null },
+        update: { position, comment: comment ?? null, changed: new Date() },
+    });
+
+    return subsonicOk(req, res);
+}));
+
+playbackRouter.all("/deleteBookmark.view", wrap(async (req, res) => {
+    const userId = req.user!.id;
+    const id = req.query.id as string;
+    if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
+
+    await prisma.subsonicBookmark.deleteMany({
+        where: { userId, trackId: id },
+    });
+
+    return subsonicOk(req, res);
+}));
+
 // ===================== LYRICS =====================
 
 playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
