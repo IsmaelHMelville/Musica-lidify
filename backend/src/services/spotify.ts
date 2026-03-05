@@ -1222,6 +1222,36 @@ class SpotifyService {
             return [];
         }
     }
+
+    async getTrackBySpotifyId(spotifyId: string): Promise<SpotifyTrack | null> {
+        const token = await this.getAnonymousToken();
+        if (!token) return null;
+        try {
+            const resp = await axios.get(
+                `https://api.spotify.com/v1/tracks/${spotifyId}`,
+                {
+                    headers: { Authorization: `Bearer ${token}`, "User-Agent": "Mozilla/5.0" },
+                    timeout: 5000,
+                },
+            );
+            const t = resp.data;
+            return {
+                spotifyId: t.id,
+                title: t.name,
+                artist: t.artists?.[0]?.name || "",
+                artistId: t.artists?.[0]?.id || "",
+                album: t.album?.name || "",
+                albumId: t.album?.id || "",
+                isrc: t.external_ids?.isrc || null,
+                durationMs: t.duration_ms,
+                trackNumber: t.track_number,
+                previewUrl: t.preview_url || null,
+                coverUrl: t.album?.images?.[0]?.url || null,
+            };
+        } catch {
+            return null;
+        }
+    }
 }
 
 export const spotifyService = new SpotifyService();
