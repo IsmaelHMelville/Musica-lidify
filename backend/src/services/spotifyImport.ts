@@ -18,6 +18,7 @@ import { redisClient } from "../utils/redis";
 import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
 import { extractPrimaryArtist } from "../utils/artistNormalization";
+import { trackIdentityService } from "./trackIdentity";
 import { eventBus } from "./eventBus";
 import { M3UEntry } from "./m3uParser";
 import {
@@ -115,6 +116,7 @@ export interface ImportJob {
     albumMbid: string | null;
     artistMbid: string | null;
     preMatchedTrackId: string | null; // Track ID if already matched in preview
+    isrc: string | null;
   }>;
 }
 
@@ -301,6 +303,31 @@ class SpotifyImportService {
     const cleanedAlbum = normalizeAlbumForMatching(spotifyTrack.album);
     const isUnknownAlbum =
       spotifyTrack.album === "Unknown Album" || !spotifyTrack.album;
+
+    // Strategy 0: ISRC match (deterministic -- same recording, guaranteed match)
+    if (spotifyTrack.isrc) {
+      const isrcMatch = await prisma.track.findFirst({
+        where: {
+          isrc: spotifyTrack.isrc,
+          album: { location: "LIBRARY" },
+        },
+        include: { album: { include: { artist: true } } },
+      });
+      if (isrcMatch) {
+        return {
+          spotifyTrack,
+          localTrack: {
+            id: isrcMatch.id,
+            title: isrcMatch.title,
+            albumId: isrcMatch.albumId,
+            albumTitle: isrcMatch.album.title,
+            artistName: isrcMatch.album.artist.name,
+          },
+          matchType: "exact",
+          matchConfidence: 100,
+        };
+      }
+    }
 
     // Strategy 1: Exact match by primary artist + album + title
     let exactMatch = await prisma.track.findFirst({
@@ -928,6 +955,19 @@ class SpotifyImportService {
       tracks.map((track) => matchLimit(() => this.matchTrack(track))),
     );
 
+    // Fire-and-forget: store ISRCs on matched tracks
+    for (let i = 0; i < tracks.length; i++) {
+      const track = tracks[i];
+      const matched = matchedTracks[i];
+      if (track.isrc && matched.localTrack) {
+        trackIdentityService.storeIsrc(
+          matched.localTrack.id,
+          track.isrc,
+          "spotify",
+        ).catch(() => {});
+      }
+    }
+
     // Second pass: build unmatchedByAlbum from ordered results
     const unmatchedByAlbum = new Map<string, SpotifyTrack[]>();
     for (let i = 0; i < tracks.length; i++) {
@@ -1268,6 +1308,7 @@ class SpotifyImportService {
         albumMbid: actualAlbumMbid,
         artistMbid: albumToDownload?.artistMbid || null,
         preMatchedTrackId: m.localTrack?.id || null,
+        isrc: m.spotifyTrack.isrc || null,
       };
     });
   }
@@ -1896,6 +1937,19 @@ class SpotifyImportService {
       allArtists.map((a) => (a.normalizedName || a.name).toLowerCase().split(" ")[0]),
     );
 
+    // --- Batch pre-load: ISRC-based matches ---
+    const pendingIsrcs = job.pendingTracks
+      .filter((t) => t.isrc)
+      .map((t) => t.isrc!);
+    const isrcMatches = pendingIsrcs.length > 0
+      ? new Map(
+          (await prisma.track.findMany({
+            where: { isrc: { in: pendingIsrcs }, album: { location: "LIBRARY" } },
+            select: { id: true, isrc: true, title: true },
+          })).map((t) => [t.isrc!, t]),
+        )
+      : new Map<string, { id: string; isrc: string; title: string }>();
+
     // Match all pending tracks against the pre-loaded library
     const matchedTrackIds: string[] = [];
     let trackIndex = 0;
@@ -1920,6 +1974,17 @@ class SpotifyImportService {
           logger?.logTrackMatch(
             trackIndex, job.tracksTotal, pendingTrack.title, pendingTrack.artist, true, existingTrack.id,
           );
+          continue;
+        }
+      }
+
+      // ISRC match (Strategy 0 - deterministic)
+      if (pendingTrack.isrc) {
+        const isrcMatch = isrcMatches.get(pendingTrack.isrc);
+        if (isrcMatch) {
+          matchedTrackIds.push(isrcMatch.id);
+          logger?.debug(`   ISRC match: "${pendingTrack.title}" -> ${isrcMatch.id}`);
+          logger?.logTrackMatch(trackIndex, job.tracksTotal, pendingTrack.title, pendingTrack.artist, true, isrcMatch.id);
           continue;
         }
       }
@@ -2218,6 +2283,7 @@ class SpotifyImportService {
           albumMbid: track.albumMbid,
           artistMbid: track.artistMbid,
           deezerPreviewUrl: track.deezerPreviewUrl,
+          isrc: track.isrc || null,
           sort: track.originalIndex,
         })),
         skipDuplicates: true,
