@@ -2301,6 +2301,12 @@ class SpotifyImportService {
     job.status = "completed";
     job.progress = 100;
     job.updatedAt = new Date();
+
+    // Fire-and-forget genre enrichment for matched tracks with ISRCs
+    this.enrichMatchedTrackGenres(job).catch((err) =>
+      logger?.warn(`Genre enrichment failed: ${err.message}`),
+    );
+
     await saveImportJob(job);
 
     logger?.debug(`[Spotify Import] Job ${job.id} completed:`);
@@ -2335,6 +2341,74 @@ class SpotifyImportService {
 
     // Clean up job logger to prevent memory leak
     jobLoggers.delete(job.id);
+  }
+
+  private async enrichMatchedTrackGenres(job: ImportJob): Promise<void> {
+    const logger = jobLoggers.get(job.id);
+
+    const tracksWithIsrc = await prisma.track.findMany({
+      where: {
+        isrc: { not: null },
+        trackGenres: { none: {} },
+        playlistItems: job.createdPlaylistId
+          ? { some: { playlistId: job.createdPlaylistId } }
+          : undefined,
+      },
+      select: { id: true, isrc: true, title: true },
+      take: 200,
+    });
+
+    if (tracksWithIsrc.length === 0) return;
+    logger?.debug(
+      `Enriching genres for ${tracksWithIsrc.length} tracks via MusicBrainz ISRC`,
+    );
+
+    let enriched = 0;
+    for (const track of tracksWithIsrc) {
+      try {
+        const recording = await musicBrainzService.lookupByIsrc(track.isrc!);
+        if (!recording) continue;
+
+        const genreData = await musicBrainzService.getRecordingGenres(
+          recording.recordingId,
+        );
+        if (!genreData || genreData.genres.length === 0) continue;
+
+        const topGenres = genreData.genres
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5)
+          .map((g) => g.name);
+
+        await trackIdentityService.populateTrackGenres(track.id, topGenres);
+
+        const existingTrack = await prisma.track.findUnique({
+          where: { id: track.id },
+          select: { lastfmTags: true },
+        });
+        if (
+          existingTrack &&
+          existingTrack.lastfmTags.length === 0 &&
+          genreData.tags.length > 0
+        ) {
+          const moodTags = genreData.tags
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 10)
+            .map((t) => t.name);
+          await prisma.track.update({
+            where: { id: track.id },
+            data: { lastfmTags: moodTags },
+          });
+        }
+
+        enriched++;
+      } catch {
+        // Non-fatal -- continue with next track
+      }
+    }
+
+    logger?.debug(
+      `Genre enrichment complete: ${enriched}/${tracksWithIsrc.length} tracks enriched`,
+    );
   }
 
   /**
