@@ -45,6 +45,7 @@ interface ScanResult {
     tracksAdded: number;
     tracksUpdated: number;
     tracksRemoved: number;
+    tracksCorrupt: number;
     errors: Array<{ file: string; error: string }>;
     duration: number;
 }
@@ -73,6 +74,7 @@ export class MusicScannerService {
             tracksAdded: 0,
             tracksUpdated: 0,
             tracksRemoved: 0,
+            tracksCorrupt: 0,
             errors: [],
             duration: 0,
         };
@@ -156,6 +158,17 @@ export class MusicScannerService {
                     result.errors.push(error);
                     progress.errors.push(error);
                     logger.error(`Error processing ${audioFile}:`, err);
+
+                    const relativePath = path.relative(musicPath, audioFile);
+                    const existingTrack = tracksByPath.get(relativePath);
+                    if (existingTrack) {
+                        await prisma.track.update({
+                            where: { id: existingTrack.id },
+                            data: { corrupt: true },
+                        });
+                        result.tracksCorrupt++;
+                        logger.debug(`Marked track as corrupt: ${relativePath}`);
+                    }
                 } finally {
                     filesScanned++;
                     progress.filesScanned = filesScanned;
@@ -299,7 +312,7 @@ export class MusicScannerService {
 
         result.duration = Date.now() - startTime;
         logger.debug(
-            `Scan complete: +${result.tracksAdded} ~${result.tracksUpdated} -${result.tracksRemoved} (${result.duration}ms)`
+            `Scan complete: +${result.tracksAdded} ~${result.tracksUpdated} -${result.tracksRemoved} corrupt:${result.tracksCorrupt} (${result.duration}ms)`
         );
 
         // Update artist counts in background (non-blocking)
@@ -993,6 +1006,7 @@ export class MusicScannerService {
                 mime,
                 fileModified: stats.mtime,
                 fileSize: stats.size,
+                corrupt: false,
             },
         });
 

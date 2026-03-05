@@ -590,6 +590,7 @@ model Track {
   filePath                    String                   @unique
   fileModified                DateTime
   fileSize                    Int
+  corrupt                     Boolean                  @default(false)
   bpm                         Float?
   beatsCount                  Int?
   key                         String?
